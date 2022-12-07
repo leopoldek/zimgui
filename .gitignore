@@ -1,0 +1,13 @@
+# Zig files
+zig-cache/
+zig-out/
+bin/
+/release/
+/debug/
+/build/
+/build-*/
+/docgen_tmp/
+
+# Editor Files
+.kateproject
+.project.gf
