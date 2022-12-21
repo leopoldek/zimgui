@@ -45,7 +45,7 @@ const FuncDef = struct {
     fn printFunc(self: @This(), writer: anytype) !void {
         if (self.base) |base| {
             if (base.constructor) {
-                if (!std.mem.endsWith(u8, self.extern_name, self.name)) {
+                if (!std.mem.endsWith(u8, self.extern_name, base.name)) {
                     // This is an overloaded function.
                     const start = std.mem.lastIndexOfScalar(u8, self.extern_name, '_').? + 1;
                     try writer.print("pub inline fn init{s}(", .{self.extern_name[start..]});
@@ -218,6 +218,9 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
     var type_map = TypeMap.init(allocator);
 
     { // Common Types
+        // TODO(Daniel): Use c_int, c_uint, c_short, etc...
+        // Or instead add checks that i32 == c_int, etc...
+        // Or use c_int for the raw functions, but i32 or whatever for generated functions.
         try type_map.putNoClobber("int", "i32");
         try type_map.putNoClobber("unsigned int", "u32");
         try type_map.putNoClobber("short", "i16");
@@ -565,6 +568,9 @@ fn parseFieldName(parent: []const u8, str: []const u8) ![]const u8 {
         name = prefixTrim(name, parent);
         name = prefixTrim(name, "_");
     }
+    name = prefixTrim(name, "ImGui");
+    // NOTE(Daniel): Do not trim '_' at the front because it denotes that a field is meant to be private.
+    //name = prefixTrim(name, "_");
     //if (std.mem.indexOfScalar(u8, name, '_')) |underscore| name = name[underscore + 1 ..];
 
     // We have to convert to snake case here.
