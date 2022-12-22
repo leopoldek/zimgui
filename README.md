@@ -1,15 +1,7 @@
 # zimgui
 
-> ⚠️ The library is still in alpha. Expect some breaking changes and bugs.
-
 zimgui uses [cimgui](https://github.com/cimgui/cimgui) to generate [Zig](https://github.com/ziglang/zig) bindings for [Dear ImGui](https://github.com/ocornut/imgui).
-
-It is currently up to date with [Dear ImGui v1.89](https://github.com/ocornut/imgui/tree/v1.89).
-
-> This is based off of [SpexGuy/Zig-ImGui](https://github.com/SpexGuy/Zig-ImGui). Changes made:
-> - Instead of python, the bindings are generated in Zig. No python dependency is required.
-> - Changed names of decls to the zig canonical format.
-> - Removed cimgui submodule. Instead if you want to update, you must copy the relevant files manually to where they belong (see [Generating new bindings](#generating-new-bindings)).
+Based off of [SpexGuy/Zig-ImGui](https://github.com/SpexGuy/Zig-ImGui).
 
 ## Using the pre-generated bindings
 

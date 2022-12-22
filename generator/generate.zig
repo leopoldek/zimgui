@@ -1,4 +1,5 @@
 const std = @import("std");
+const overrides = @import("overrides.zig");
 const Allocator = std.mem.Allocator;
 
 const TypeMap = std.StringHashMap([]const u8);
@@ -12,10 +13,11 @@ const structs_and_enums_file = @embedFile("structs_and_enums.json");
 const definitions_file = @embedFile("definitions.json");
 //const impl_definitions_file = @embedFile("impl_definitions.json");
 
-var allocator: Allocator = undefined;
+pub var allocator: Allocator = undefined;
+var type_map: TypeMap = undefined;
 //var writer: Writer = undefined;
 
-// TODO(Daniel): Have an overrides file.
+// TODO(Daniel): The below TODOs should be optional features that build system can ask for or not?
 // TODO(Daniel): Any arg name that ends with "_count" should detect if there is a corrosponding items arg. If so, combine into slice.
 // TODO(Daniel): If there is only one default arg, dont use a default args struct. Just pass the default arg directly.
 
@@ -215,12 +217,9 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
         break :blk data;
     };
 
-    var type_map = TypeMap.init(allocator);
+    type_map = TypeMap.init(allocator);
 
     { // Common Types
-        // TODO(Daniel): Use c_int, c_uint, c_short, etc...
-        // Or instead add checks that i32 == c_int, etc...
-        // Or use c_int for the raw functions, but i32 or whatever for generated functions.
         try type_map.putNoClobber("int", "i32");
         try type_map.putNoClobber("unsigned int", "u32");
         try type_map.putNoClobber("short", "i16");
@@ -283,7 +282,7 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                 continue;
             }
             try type_map.putNoClobber(name, parsed_name);
-            try writer.print("pub const {s} = {s};\n", .{ parsed_name, try parseType(type_map, type_str, false) });
+            try writer.print("pub const {s} = {s};\n", .{ parsed_name, try parseType(type_str, false) });
         }
         try writer.writeAll("\n");
     }
@@ -373,6 +372,8 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                 const defaults = overload.Object.get("defaults").?.Object;
                 var struct_name = overload.Object.get("stname").?.String;
                 if (struct_name.len != 0) struct_name = try parseIdentifier(struct_name);
+                const raw_name = overload.Object.get("ov_cimguiname").?.String;
+                const func_name = try parseFunctionName(raw_name, struct_name.len != 0);
                 var args = std.ArrayList(FuncDef.Arg).init(allocator);
                 for (overload.Object.get("argsT").?.Array.items) |arg| {
                     const arg_name = arg.Object.get("name").?.String;
@@ -381,10 +382,7 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                     const arg_type = arg.Object.get("type").?.String;
                     // TODO(Daniel): Support va_list functions in the future.
                     if (std.mem.eql(u8, arg_type, "va_list")) continue :overload_loop;
-                    var parsed_type = try parseType(type_map, arg_type, true);
-                    if (std.mem.eql(u8, parsed_name, "self") and std.mem.endsWith(u8, parsed_type, struct_name)) {
-                        parsed_type = try std.fmt.allocPrint(allocator, "*{s}", .{prefixTrim(parsed_type, "[*c]")});
-                    }
+                    var parsed_type = try parseArgType(struct_name, func_name, parsed_name, arg_type);
 
                     try args.append(.{
                         .name = parsed_name,
@@ -393,14 +391,12 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                     });
                 }
 
-                const raw_name = overload.Object.get("ov_cimguiname").?.String;
                 if (std.mem.startsWith(u8, raw_name, "ImVector")) continue;
-                const name = try parseFunctionName(raw_name, struct_name.len != 0);
                 try functions_list.append(.{
-                    .name = name,
+                    .name = func_name,
                     .extern_name = raw_name,
                     .args = args.toOwnedSlice(),
-                    .ret = if (overload.Object.get("ret")) |r| try parseType(type_map, r.String, false) else "void",
+                    .ret = if (overload.Object.get("ret")) |r| try parseArgType(struct_name, func_name, "return", r.String) else "void",
                     .base = if (struct_name.len == 0) null else .{
                         .name = struct_name,
                         .constructor = overload.Object.contains("constructor"),
@@ -433,9 +429,10 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                     std.debug.print("{s}\n", .{type_str});
                     unreachable;
                 }
-                try writer.print("Vector({s}),\n", .{try parseType(type_map, template_str, false)});
+                const parsed_template = try std.fmt.allocPrint(allocator, "Vector({s})\n", .{try parseType(template_str, false)});
+                try writer.print("{s},\n", .{try overrides.parse(struct_name, null, name, parsed_template)});
             } else {
-                try writer.print("{s},\n", .{try parseType(type_map, type_str, false)});
+                try writer.print("{s},\n", .{try parseFieldType(struct_name, name, type_str)});
             }
         }
         for (funcs) |func| {
@@ -461,7 +458,26 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
     try writer.writeAll("};\n");
 }
 
-fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]const u8 {
+fn parseArgType(
+    struct_name: []const u8,
+    func_name: []const u8,
+    arg_name: []const u8,
+    type_name: []const u8,
+) ![]const u8 {
+    const parsed_type = try parseType(type_name, !std.mem.eql(u8, arg_name, "return"));
+    return try overrides.parse(if (struct_name.len == 0) null else struct_name, func_name, arg_name, parsed_type);
+}
+
+fn parseFieldType(
+    struct_name: []const u8,
+    field_name: []const u8,
+    type_name: []const u8,
+) ![]const u8 {
+    const parsed_type = try parseType(type_name, false);
+    return try overrides.parse(struct_name, null, field_name, parsed_type);
+}
+
+fn parseType(type_str_arg: []const u8, is_func_arg: bool) ![]const u8 {
     // Remove trailing const, it doesn't mean anything to Zig.
     var type_str = suffixTrim(type_str_arg, "const");
     if (type_map.get(type_str)) |v| return v;
@@ -474,7 +490,7 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
         var tokens = std.mem.tokenize(u8, type_str[start..end], ";");
         while (tokens.next()) |token| {
             const name_index = std.mem.lastIndexOfAny(u8, token, &std.ascii.whitespace).? + 1;
-            try parsed_union.writer().print("{s}: {s}, ", .{ trim(token[name_index..]), try parseType(type_map, token[0..name_index], is_func_arg) });
+            try parsed_union.writer().print("{s}: {s}, ", .{ trim(token[name_index..]), try parseType(token[0..name_index], is_func_arg) });
         }
         try parsed_union.append('}');
         return parsed_union.toOwnedSlice();
@@ -482,7 +498,7 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
 
     if (std.mem.indexOf(u8, type_str, "(*)")) |ptr_index| {
         // Function pointer
-        const return_type = try parseType(type_map, type_str[0..ptr_index], is_func_arg);
+        const return_type = try parseType(type_str[0..ptr_index], is_func_arg);
         var args = type_str[ptr_index + 3 ..];
         args = args[std.mem.indexOfScalar(u8, args, '(').? + 1 .. std.mem.lastIndexOfScalar(u8, args, ')').?];
         var split = std.mem.tokenize(u8, args, ",");
@@ -492,10 +508,10 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
             if (getIdentifierCount(arg) > 1) {
                 const split_index = std.mem.lastIndexOfAny(u8, arg, comptime std.ascii.whitespace ++ "*").? + 1;
                 const parsed_name = trimFront(arg, split_index);
-                const parsed_type = try parseType(type_map, trim(arg[0..split_index]), is_func_arg);
+                const parsed_type = try parseType(trim(arg[0..split_index]), is_func_arg);
                 arg_str = try std.fmt.allocPrint(allocator, "{s}: {s}", .{ parsed_name, parsed_type });
             } else {
-                arg_str = try parseType(type_map, trim(arg), is_func_arg);
+                arg_str = try parseType(trim(arg), is_func_arg);
             }
             try parsed_args.appendSlice(arg_str);
             try parsed_args.append(',');
@@ -513,7 +529,7 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
         if (ptr_ending) |end_str| {
             const ptr_type = try std.fmt.allocPrint(allocator, "[*c]{s}{s}", .{
                 if (is_const) "const " else "",
-                try parseType(type_map, suffixTrim(type_str, end_str), is_func_arg),
+                try parseType(suffixTrim(type_str, end_str), is_func_arg),
             });
             return type_map.get(ptr_type) orelse ptr_type;
         }
@@ -527,7 +543,7 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
         return try std.fmt.allocPrint(allocator, "{s}[{s}]{s}", .{
             if (is_func_arg) "*" else "",
             number_str,
-            try parseType(type_map, trim(type_str[0..start]), is_func_arg),
+            try parseType(trim(type_str[0..start]), is_func_arg),
         });
     }
 
@@ -535,7 +551,7 @@ fn parseType(type_map: TypeMap, type_str_arg: []const u8, is_func_arg: bool) ![]
 }
 
 fn parseIdentifier(name: []const u8) ![]const u8 {
-    // TODO(Daniel): STB_TexteditState
+    if (std.mem.eql(u8, name, "STB_TexteditState")) return "StbTexteditState";
     if (std.mem.startsWith(u8, name, "ImVector_")) {
         var rest = name[9..];
         var prefix: []const u8 = "";
@@ -584,7 +600,6 @@ fn parseFieldName(parent: []const u8, str: []const u8) ![]const u8 {
         try snake_case.append(std.ascii.toLower(c));
     }
 
-    // HACK(Daniel): This is probably really slow.
     _ = std.fmt.parseInt(u64, snake_case.items, 0) catch return snake_case.items;
     // This parsed to a number, which means we have to wrap it.
     try snake_case.insertSlice(0, "@\"");
@@ -634,11 +649,9 @@ fn parseDefaultValue(enums: EnumMap, type_str: []const u8, str: []const u8) ![]c
             return std.fmt.allocPrint(allocator, "@intToEnum({s}, {s})", .{ type_str, value_str });
         }
     }
-    // HACK(Daniel): Parse arbitrary types in sizeof
-    if (std.mem.eql(u8, value_str, "sizeof(float)")) return "@sizeOf(f32)";
-    //if (std.mem.startsWith(u8, value_str, "sizeof")) {
-    //    return std.fmt.allocPrint(allocator, "@sizeOf({s})", .{try parseType(type_map, value_str[7..value_str.len - 1])});
-    //}
+    if (std.mem.startsWith(u8, value_str, "sizeof")) {
+        return std.fmt.allocPrint(allocator, "@sizeOf({s})", .{try parseType(value_str[7..value_str.len - 1], false)});
+    }
     return value_str;
 }
 

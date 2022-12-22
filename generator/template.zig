@@ -8,6 +8,14 @@ const builtin = @import("builtin");
 const assert = @import("std").debug.assert;
 const imgui = @This();
 
+comptime {
+    // NOTE(Daniel): Since we use hardcoded integer sizes, we should check that they are compatible with C.
+    std.debug.assert(@sizeOf(u32) == @sizeOf(c_uint));
+    std.debug.assert(@sizeOf(i32) == @sizeOf(c_int));
+    std.debug.assert(@sizeOf(u16) == @sizeOf(c_ushort));
+    std.debug.assert(@sizeOf(i16) == @sizeOf(c_short));
+}
+
 pub const reset_render_state = @intToPtr(DrawCallback, ~@as(usize, 0));
 
 pub fn checkVersion() void {
