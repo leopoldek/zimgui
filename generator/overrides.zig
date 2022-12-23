@@ -4,14 +4,7 @@ const generate = @import("generate.zig");
 const Allocator = std.mem.Allocator;
 
 /// There are all regex expressions (except for the type)
-const Rule = struct {
-    // TODO(Daniel): Fix this when we update to latest zig by removing the field names.
-    @"0": []const u8,
-    @"1": ?[]const u8,
-    @"2": ?[]const u8,
-    @"3": []const u8,
-    @"4": []const u8,
-};
+const Rule = struct { []const u8, ?[]const u8, ?[]const u8, []const u8, []const u8 };
 
 /// Rules are checked top-to-bottom for the first match.
 /// .{type_matcher, struct_matcher, func_matcher, field_arg_matcher, type_override}
@@ -47,21 +40,21 @@ pub fn parse(
     type_name: []const u8,
 ) ![]const u8 {
     for (rules) |rule| {
-        if (!match(type_name, rule.@"0")) continue;
-        if (rule.@"1" == null and struct_name != null) continue;
-        if (rule.@"1") |matcher| {
+        if (!match(type_name, rule[0])) continue;
+        if (rule[1] == null and struct_name != null) continue;
+        if (rule[1]) |matcher| {
             if (!match(struct_name orelse "", matcher)) continue;
         }
-        if (rule.@"2" == null and struct_name == null) continue;
-        if (rule.@"2" == null and func_name != null) continue;
-        if (rule.@"2") |matcher| {
+        if (rule[2] == null and struct_name == null) continue;
+        if (rule[2] == null and func_name != null) continue;
+        if (rule[2]) |matcher| {
             if (!match(func_name orelse "", matcher)) continue;
         }
-        if (!match(field_arg_name, rule.@"3")) continue;
+        if (!match(field_arg_name, rule[3])) continue;
 
         // Found rule.
         const identifier = if (std.mem.lastIndexOfAny(u8, type_name, "]*")) |i| type_name[i + 1 ..] else type_name;
-        return try std.mem.replaceOwned(u8, generate.allocator, rule.@"4", "$", identifier);
+        return try std.mem.replaceOwned(u8, generate.allocator, rule[4], "$", identifier);
     }
     return type_name;
 }

@@ -395,7 +395,7 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                 try functions_list.append(.{
                     .name = func_name,
                     .extern_name = raw_name,
-                    .args = args.toOwnedSlice(),
+                    .args = args.items,
                     .ret = if (overload.Object.get("ret")) |r| try parseArgType(struct_name, func_name, "return", r.String) else "void",
                     .base = if (struct_name.len == 0) null else .{
                         .name = struct_name,
@@ -405,7 +405,7 @@ pub fn generate(user_allocator: Allocator, writer: anytype) !void {
                 });
             }
         }
-        break :blk functions_list.toOwnedSlice();
+        break :blk functions_list.items;
     };
 
     // Parse structs
